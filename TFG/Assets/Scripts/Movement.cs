@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class Movement : MonoBehaviour
 {
@@ -10,8 +11,11 @@ public class Movement : MonoBehaviour
     private bool isMoving = false;
     private Vector3 targetPosition;
 
-    // Mapa lógico: casillas donde hay suelo
+    public GameObject spikePrefab;
+    public GameObject patrollerPrefab;
+
     private HashSet<Vector2Int> groundTiles = new HashSet<Vector2Int>();
+    private Dictionary<Vector2Int, GameObject> tileObjects = new Dictionary<Vector2Int, GameObject>();
 
     private Vector2 touchStartPos;
     private bool touchMoved = false;
@@ -19,13 +23,15 @@ public class Movement : MonoBehaviour
 
     public GameObject groundTilePrefab;
 
+    private int generatedHeight = 0;
+    private int chunkSize = 10;
+    private int safeRowsBelow = 15;
+
     void Start()
     {
+        transform.position = new Vector3(0, 1, 0);
         targetPosition = transform.position;
-
-        // Crear mapa simple (puede reemplazarse por generación o tilemap)
-        GenerateDungeon(50); // cantidad de pasos aleatorios
-        GenerateVisualMap();
+        GenerateNewChunk(); // Genera el primer bloque
     }
 
     void Update()
@@ -34,7 +40,7 @@ public class Movement : MonoBehaviour
         {
             Vector3 direction = Vector3.zero;
 
-            // Detectar swipe táctil
+            // Input táctil
             if (Input.touchCount > 0)
             {
                 Touch touch = Input.GetTouch(0);
@@ -50,26 +56,20 @@ public class Movement : MonoBehaviour
                 }
                 else if (touch.phase == TouchPhase.Ended && touchMoved)
                 {
-                    Vector2 touchEndPos = touch.position;
-                    Vector2 delta = touchEndPos - touchStartPos;
+                    Vector2 delta = touch.position - touchStartPos;
 
                     if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
-                    {
-                        direction = (delta.x > 0) ? new Vector3(tileSize, 0, 0) : new Vector3(-tileSize, 0, 0);
-                    }
+                        direction = (delta.x > 0) ? Vector3.right * tileSize : Vector3.left * tileSize;
                     else
-                    {
-                        direction = (delta.y > 0) ? new Vector3(0, tileSize, 0) : new Vector3(0, -tileSize, 0);
-                    }
+                        direction = (delta.y > 0) ? Vector3.up * tileSize : Vector3.down * tileSize;
                 }
             }
 
 #if UNITY_EDITOR
-            // Para pruebas con teclado en el editor
-            if (Input.GetKeyDown(KeyCode.W)) direction = new Vector3(0, tileSize, 0);
-            else if (Input.GetKeyDown(KeyCode.S)) direction = new Vector3(0, -tileSize, 0);
-            else if (Input.GetKeyDown(KeyCode.A)) direction = new Vector3(-tileSize, 0, 0);
-            else if (Input.GetKeyDown(KeyCode.D)) direction = new Vector3(tileSize, 0, 0);
+            if (Input.GetKeyDown(KeyCode.W)) direction = Vector3.up * tileSize;
+            else if (Input.GetKeyDown(KeyCode.S)) direction = Vector3.down * tileSize;
+            else if (Input.GetKeyDown(KeyCode.A)) direction = Vector3.left * tileSize;
+            else if (Input.GetKeyDown(KeyCode.D)) direction = Vector3.right * tileSize;
 #endif
 
             if (direction != Vector3.zero)
@@ -79,15 +79,18 @@ public class Movement : MonoBehaviour
 
                 if (groundTiles.Contains(gridPos))
                 {
-                    targetPosition = destination;
+                    targetPosition = new Vector3(gridPos.x, gridPos.y, 0);
                     StartCoroutine(MoveToTarget());
                 }
                 else
                 {
-                    StartCoroutine(FallDown(destination));
+                    StartCoroutine(FallAndDie());
                 }
             }
         }
+
+        CheckAndExpandMap();
+        CleanupOldTiles();
     }
 
     private IEnumerator MoveToTarget()
@@ -104,100 +107,132 @@ public class Movement : MonoBehaviour
         isMoving = false;
     }
 
-    private IEnumerator FallDown(Vector3 fallPosition)
+    private IEnumerator FallAndDie()
     {
         isMoving = true;
 
-        float fallTime = 0.5f;
-        float timer = 0f;
-        Vector3 start = transform.position;
-        Vector3 end = fallPosition + Vector3.down * 5f;
+        float duration = 0.5f;
+        float elapsed = 0f;
+        Vector3 originalScale = transform.localScale;
+        Vector3 targetScale = Vector3.zero;
+        Vector3 fallOffset = new Vector3(0, -1f, 0);
 
-        while (timer < fallTime)
+        Vector3 startPos = transform.position;
+        Vector3 endPos = startPos + fallOffset;
+
+        while (elapsed < duration)
         {
-            transform.position = Vector3.Lerp(start, end, timer / fallTime);
-            timer += Time.deltaTime;
+            elapsed += Time.deltaTime;
+            float t = elapsed / duration;
+
+            transform.localScale = Vector3.Lerp(originalScale, targetScale, t);
+            transform.position = Vector3.Lerp(startPos, endPos, t);
+
             yield return null;
         }
 
-        transform.position = end;
-        isMoving = false;
+        //yield return new WaitForSeconds(0.5f);
+        //SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
 
-        Debug.Log("¡El jugador se cayó!");
-        // Aquí podés reiniciar el nivel, mostrar animación o UI
+        GameObject.FindObjectOfType<GameManager>().GameOver(Mathf.FloorToInt(transform.position.y));
     }
 
-    // Convierte una posición del mundo a una posición en la grilla
     private Vector2Int WorldToGrid(Vector3 pos)
     {
         return new Vector2Int(Mathf.RoundToInt(pos.x), Mathf.RoundToInt(pos.y));
     }
 
-    private void GenerateVisualMap()
+    private void CheckAndExpandMap()
     {
-        foreach (Vector2Int tile in groundTiles)
+        int playerY = Mathf.RoundToInt(transform.position.y);
+
+        if (playerY + 10 > generatedHeight)
         {
-            Vector3 worldPos = new Vector3(tile.x, tile.y, 0);
-            Instantiate(groundTilePrefab, worldPos, Quaternion.identity);
+            GenerateNewChunk();
         }
     }
 
-    private void GenerateDungeon(int height)
+    private void GenerateNewChunk()
     {
-        groundTiles.Clear();
+        int pathX = 0;
 
-        int currentY = 0;
-        int pathX = 0; // posición actual en X del camino principal
-
-        for (int y = 0; y < height; y++)
+        for (int y = generatedHeight - 1; y >= 0; y--)
         {
-            currentY++;
+            for (int x = -10; x <= 10; x++)
+            {
+                if (groundTiles.Contains(new Vector2Int(x, y)))
+                {
+                    pathX = x;
+                    break;
+                }
+            }
+            if (pathX != 0) break;
+        }
 
-            // Randomiza ancho del camino para esta fila
-            int pathWidth = Random.Range(2, 5); // entre 2 y 4 casillas de ancho
+        for (int i = 0; i < chunkSize; i++)
+        {
+            generatedHeight++;
 
-            // Randomiza desplazamiento horizontal (sin alejarse mucho)
+            int pathWidth = Random.value > 0.2f ? 3 : Random.Range(2, 5);
             int offsetX = Mathf.Clamp(pathX + Random.Range(-1, 2), -5, 5);
 
             for (int x = offsetX; x < offsetX + pathWidth; x++)
             {
-                Vector2Int tile = new Vector2Int(x, currentY);
-                groundTiles.Add(tile);
+                Vector2Int tile = new Vector2Int(x, generatedHeight);
+                if (!groundTiles.Contains(tile))
+                {
+                    groundTiles.Add(tile);
+                    GameObject obj = Instantiate(groundTilePrefab, new Vector3(x, generatedHeight, 0), Quaternion.identity);
+                    tileObjects[tile] = obj;
+                }
             }
 
-            // Elige nueva posición central del camino para la próxima fila
             pathX = offsetX + Random.Range(0, pathWidth);
+
+            //
+             if (Random.value < 0.2f)  // 20% de probabilidad por fila
+        {
+            int trapX = Random.Range(offsetX, offsetX + pathWidth);
+            Vector2Int trapTile = new Vector2Int(trapX, generatedHeight);
+
+             GameObject spike = Instantiate(spikePrefab, new Vector3(trapTile.x, trapTile.y, 0), Quaternion.identity);
+            tileObjects[trapTile] = spike;  // opcional, para limpiar luego
         }
 
-        // Posición inicial del jugador (abajo del dungeon)
-        transform.position = new Vector3(0, 1, 0);
-        targetPosition = transform.position;
+        // Agrega patrulleros
+        if (Random.value < 0.1f)
+        {
+            int patrolX = offsetX + pathWidth / 2;
+            GameObject enemy = Instantiate(patrollerPrefab, new Vector3(patrolX, generatedHeight, 0), Quaternion.identity);
+        }
+        ///
+        }
+
+        ///
+       
     }
 
-
-    private Vector2Int GetVerticalPathDirection()
+    private void CleanupOldTiles()
     {
-        // Solo permitimos arriba, arriba-izquierda o arriba-derecha
-        Vector2Int[] directions = new Vector2Int[]
+        int playerY = Mathf.RoundToInt(transform.position.y);
+        List<Vector2Int> toRemove = new List<Vector2Int>();
+
+        foreach (var tile in groundTiles)
         {
-        Vector2Int.up,                        // recto hacia arriba
-        Vector2Int.up + Vector2Int.left,     // diagonal izquierda
-        Vector2Int.up + Vector2Int.right     // diagonal derecha
-        };
+            if (tile.y < playerY - safeRowsBelow)
+            {
+                toRemove.Add(tile);
+            }
+        }
 
-        return directions[Random.Range(0, directions.Length)];
-    }
-
-    private Vector2Int GetRandomDirection()
-    {
-        Vector2Int[] directions = new Vector2Int[]
+        foreach (var tile in toRemove)
         {
-        Vector2Int.up,
-        Vector2Int.down,
-        Vector2Int.left,
-        Vector2Int.right
-        };
-
-        return directions[Random.Range(0, directions.Length)];
+            groundTiles.Remove(tile);
+            if (tileObjects.ContainsKey(tile))
+            {
+                Destroy(tileObjects[tile]);
+                tileObjects.Remove(tile);
+            }
+        }
     }
 }
