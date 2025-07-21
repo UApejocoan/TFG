@@ -12,7 +12,7 @@ public class ScoreManager : MonoBehaviour
     void Start()
     {
         highestY = player.position.y;
-        highScoreText.text = "Récord: " + PlayerPrefs.GetInt("HighScore", 0).ToString();
+        highScoreText.text = "Record: " + PlayerPrefs.GetInt("HighScore", 0).ToString();
     }
 
     void Update()
@@ -26,7 +26,7 @@ public class ScoreManager : MonoBehaviour
             if (score > PlayerPrefs.GetInt("HighScore", 0))
             {
                 PlayerPrefs.SetInt("HighScore", score);
-                highScoreText.text = "Récord: " + score.ToString();
+                highScoreText.text = "Record: " + score.ToString();
             }
         }
     }

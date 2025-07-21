@@ -27,9 +27,13 @@ public class Movement : MonoBehaviour
     private int chunkSize = 10;
     private int safeRowsBelow = 15;
 
+    //Guardar camino seguro
+    private List<Vector2Int> mainPath = new List<Vector2Int>();
+
+
     void Start()
     {
-        transform.position = new Vector3(0, 1, 0);
+        transform.position = new Vector3(0, 1, -1);
         targetPosition = transform.position;
         GenerateNewChunk(); // Genera el primer bloque
     }
@@ -79,7 +83,7 @@ public class Movement : MonoBehaviour
 
                 if (groundTiles.Contains(gridPos))
                 {
-                    targetPosition = new Vector3(gridPos.x, gridPos.y, 0);
+                    targetPosition = new Vector3(gridPos.x, gridPos.y, -1);
                     StartCoroutine(MoveToTarget());
                 }
                 else
@@ -156,25 +160,32 @@ public class Movement : MonoBehaviour
     {
         int pathX = 0;
 
-        for (int y = generatedHeight - 1; y >= 0; y--)
+        // Encuentra el último punto del camino
+        if (mainPath.Count > 0)
         {
-            for (int x = -10; x <= 10; x++)
-            {
-                if (groundTiles.Contains(new Vector2Int(x, y)))
-                {
-                    pathX = x;
-                    break;
-                }
-            }
-            if (pathX != 0) break;
+            pathX = mainPath[mainPath.Count - 1].x;
         }
 
         for (int i = 0; i < chunkSize; i++)
         {
             generatedHeight++;
 
+            // --- Paso 1: Generar la celda segura (camino principal) ---
+            pathX = Mathf.Clamp(pathX + Random.Range(-1, 2), -5, 5);
+            Vector2Int safeTile = new Vector2Int(pathX, generatedHeight);
+
+            // Guardar celda segura
+            mainPath.Add(safeTile);
+            if (!groundTiles.Contains(safeTile))
+            {
+                groundTiles.Add(safeTile);
+                GameObject obj = Instantiate(groundTilePrefab, new Vector3(safeTile.x, safeTile.y, 0), Quaternion.identity);
+                tileObjects[safeTile] = obj;
+            }
+
+            // --- Paso 2: Agregar más celdas a los lados como variedad ---
             int pathWidth = Random.value > 0.2f ? 3 : Random.Range(2, 5);
-            int offsetX = Mathf.Clamp(pathX + Random.Range(-1, 2), -5, 5);
+            int offsetX = Mathf.Clamp(pathX - pathWidth / 2, -10, 10);
 
             for (int x = offsetX; x < offsetX + pathWidth; x++)
             {
@@ -187,30 +198,29 @@ public class Movement : MonoBehaviour
                 }
             }
 
-            pathX = offsetX + Random.Range(0, pathWidth);
+            // --- Paso 3: Colocar trampas solo FUERA del camino seguro ---
+            if (Random.value < 0.2f)
+            {
+                int trapX;
+                do
+                {
+                    trapX = Random.Range(offsetX, offsetX + pathWidth);
+                } while (trapX == safeTile.x); // Evitar poner trampa en el camino principal
 
-            //
-             if (Random.value < 0.2f)  // 20% de probabilidad por fila
-        {
-            int trapX = Random.Range(offsetX, offsetX + pathWidth);
-            Vector2Int trapTile = new Vector2Int(trapX, generatedHeight);
+                Vector2Int trapTile = new Vector2Int(trapX, generatedHeight);
+                GameObject spike = Instantiate(spikePrefab, new Vector3(trapTile.x, trapTile.y, 0), Quaternion.identity);
+                tileObjects[trapTile] = spike;
+            }
 
-             GameObject spike = Instantiate(spikePrefab, new Vector3(trapTile.x, trapTile.y, 0), Quaternion.identity);
-            tileObjects[trapTile] = spike;  // opcional, para limpiar luego
+            // --- Paso 4: Colocar patrulleros (no bloquean el camino porque no reemplazan tiles) ---
+            if (Random.value < 0.1f)
+            {
+                int patrolX = offsetX + pathWidth / 2;
+                GameObject enemy = Instantiate(patrollerPrefab, new Vector3(patrolX, generatedHeight, 0), Quaternion.identity);
+            }
         }
-
-        // Agrega patrulleros
-        if (Random.value < 0.1f)
-        {
-            int patrolX = offsetX + pathWidth / 2;
-            GameObject enemy = Instantiate(patrollerPrefab, new Vector3(patrolX, generatedHeight, 0), Quaternion.identity);
-        }
-        ///
-        }
-
-        ///
-       
     }
+
 
     private void CleanupOldTiles()
     {

@@ -12,12 +12,14 @@ public class GameManager : MonoBehaviour
     {
         gameOverPanel.SetActive(true);
         finalScoreText.text = "Puntaje: " + score;
-        finalHighScoreText.text = "Récord: " + PlayerPrefs.GetInt("HighScore", 0).ToString();
+        finalHighScoreText.text = "Record: " + PlayerPrefs.GetInt("HighScore", 0).ToString();
         Time.timeScale = 0f; // Pausa el juego
     }
 
     public void RestartGame()
     {
+        Debug.Log("RestartGame llamado");
+
         Time.timeScale = 1f; // Reactiva el juego
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }

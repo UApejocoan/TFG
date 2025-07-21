@@ -23,12 +23,12 @@ public class InfiniteBackground : MonoBehaviour
         // Reposicionar si uno se va por debajo
         if (playerY > background1.position.y + height)
         {
-            background1.position += new Vector3(0, 2 * height, 0);
+            background1.position += new Vector3(0, 2 * height-0.5f, 0);
             SwapBackgrounds();
         }
         else if (playerY > background2.position.y + height)
         {
-            background2.position += new Vector3(0, 2 * height, 0);
+            background2.position += new Vector3(0, 2 * height-0.5f, 0);
             SwapBackgrounds();
         }
     }
