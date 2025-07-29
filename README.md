@@ -33,7 +33,7 @@ cd TFG
 
 ## ▶️ Ejecutar el juego desde el Editor
 
-1. Una vez abierto el proyecto en Unity, asegúrate de tener abierta la escena principal (por ejemplo, `MainScene.unity`).
+1. Una vez abierto el proyecto en Unity, asegúrate de tener abierta la escena principal.
 2. En el panel **Inspector**, haz clic en el botón **Play** (el triángulo arriba del editor).
 3. ¡Disfruta del juego desde el editor!
 
